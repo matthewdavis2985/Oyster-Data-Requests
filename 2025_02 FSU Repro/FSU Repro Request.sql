@@ -92,5 +92,7 @@ select
 from
 	hsdb.Dermo
 Join hsdb.Repro on hsdb.Dermo.OysterID=hsdb.Repro.OysterID
+where
+	Dermo.SampleEventID like 'ABCOLL%'
 order by
 	OysterID;
