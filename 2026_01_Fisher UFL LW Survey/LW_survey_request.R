@@ -18,8 +18,93 @@ pacman::p_load(tidyverse,
                odbc,
                DBI, 
                dbplyr, 
-               lubridate)
+               lubridate,
+               openxlsx)
 #
+library(dplyr)
+library(DBI)
+
+library(dplyr)
+library(DBI)
+
+get_metadata <- function(con, tables = NULL) {
+  
+  # ---- column structure & types ----
+  cols <- tbl(con, in_schema("INFORMATION_SCHEMA", "COLUMNS")) %>%
+    select(
+      TABLE_SCHEMA,
+      TABLE_NAME,
+      COLUMN_NAME,
+      DATA_TYPE,
+      ORDINAL_POSITION
+    )
+  
+  # ---- column descriptions (SQL Server specific) ----
+  descriptions <- tbl(con, in_schema("sys", "columns")) %>%
+    rename(COLUMN_NAME = name) %>%
+    inner_join(
+      tbl(con, in_schema("sys", "tables")) %>%
+        rename(TABLE_NAME = name),
+      by = "object_id"
+    ) %>%
+    inner_join(
+      tbl(con, in_schema("sys", "schemas")) %>%
+        rename(TABLE_SCHEMA = name),
+      by = "schema_id"
+    ) %>%
+    left_join(
+      tbl(con, in_schema("sys", "extended_properties")) %>%
+        filter(name == "MS_Description"),
+      by = c(
+        "object_id" = "major_id",
+        "column_id" = "minor_id"
+      )
+    ) %>%
+    select(
+      TABLE_SCHEMA,
+      TABLE_NAME,
+      COLUMN_NAME,
+      DESCRIPTION = value
+    )
+  
+  # ---- optionally limit to specific tables ----
+  if (!is.null(tables)) {
+    tables <- tables %>%
+      select(TABLE_SCHEMA, TABLE_NAME)
+    
+    tables_sql <- copy_to(con, tables, overwrite = TRUE)
+    
+    cols <- cols %>%
+      inner_join(
+        tables_sql,
+        by = c("TABLE_SCHEMA", "TABLE_NAME")
+      )
+    
+    descriptions <- descriptions %>%
+      inner_join(
+        tables_sql,
+        by = c("TABLE_SCHEMA", "TABLE_NAME")
+      )
+  }
+  
+  # ---- combine & return ----
+  cols %>%
+    left_join(
+      descriptions,
+      by = c("TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME")
+    ) %>%
+    arrange(TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION) %>%
+    select(
+      TABLE_SCHEMA,
+      TABLE_NAME,
+      COLUMN_NAME,
+      DATA_TYPE,
+      DESCRIPTION
+    ) %>%
+    collect()
+}
+
+
 # 
 ## Database connection ----
 con <- dbConnect(odbc(),
@@ -27,6 +112,21 @@ con <- dbConnect(odbc(),
                  Server = Server,
                  Database = Database,
                  Authentication = "ActiveDirectoryIntegrated")
+
+tables <- tibble::tribble(
+  ~TABLE_SCHEMA, ~TABLE_NAME,
+  "dbo", "FixedLocations",
+  "dbo",  "TripInfo",
+  "hsdb", "SampleEvent",
+  "dbo", "SampleEvent",
+  "hsdb", "SampleEventWQ",
+  "dbo", "SampleEventWQ",
+  "hsdb", "SurveyQuadrat",
+  "dbo", "SurveyQuadrat"
+)
+
+metadata <- get_metadata(con, tables)
+
 
 dboFixedLocations <- tbl(con,in_schema("dbo", "FixedLocations")) %>% 
   filter(Estuary %in% EstuaryCode)%>%
@@ -77,8 +177,7 @@ hsdbSampleEventWQ <- tbl(con,in_schema("hsdb", "SampleEventWQ")) %>%
   filter(
     substring(SampleEventWQID,1,2) %in% EstuaryCode & 
       TripDate >= start_date & 
-      TripDate <= end_date & 
-      substring(SampleEventWQID,3,6) == "SRVY") %>%
+      TripDate <= end_date) %>%
   collect() 
 
 dboSampleEventWQ <- tbl(con,in_schema("dbo", "SampleEventWQ")) %>% 
@@ -89,7 +188,6 @@ dboSampleEventWQ <- tbl(con,in_schema("dbo", "SampleEventWQ")) %>%
     substring(SampleEventWQID,1,2) %in% EstuaryCode & 
       TripDate >= start_date & 
       TripDate <= end_date & 
-      substring(SampleEventWQID,3,6) == "SRVY" & 
       DataStatus == "Proofed")  %>%
   collect() 
 
@@ -120,7 +218,7 @@ DBI::dbDisconnect(con)
 #
 #
 #
-## Data cleaning for output ----
+## Data combination and selection ----
 #
 # Function to subset to desired columns:
 subset_columns <- function(df, cols) {
@@ -137,7 +235,10 @@ dboTripInfo_sub  <- dboTripInfo  %>% subset_columns(Trip_columns)
 
 TripInfo <- bind_rows(hsdbTripInfo_sub, dboTripInfo_sub)
 rm(hsdbTripInfo, dboTripInfo, hsdbTripInfo_sub, dboTripInfo_sub)
-#
+
+Trip_meta <- metadata %>%
+  filter(TABLE_NAME == "TripInfo" & COLUMN_NAME %in% Trip_columns) %>%
+  dplyr::select(-TABLE_SCHEMA)
 #
 ## SampleEvent
 SE_columns <- c("SampleEventID", "TripID", "FixedLocationID", "TripDate", "Comments", "DataStatus", "DateProofed", "DateCompleted")
@@ -147,16 +248,25 @@ dboSampleEvent_sub  <- dboSampleEvent  %>% subset_columns(SE_columns)
 
 SampleEvent <- bind_rows(hsdbSampleEvent_sub, dboSampleEvent_sub)
 rm(hsdbSampleEvent, dboSampleEvent, hsdbSampleEvent_sub, dboSampleEvent_sub)
-#
+
+Event_meta <- metadata %>%
+  filter(TABLE_NAME == "SampleEvent" & COLUMN_NAME %in% SE_columns) %>%
+  dplyr::select(-TABLE_SCHEMA) %>%
+  distinct()
 #
 ## SampleEvent Water Quality
-SEWQ_columns <- c("SampleEventWQID", "SampleEventID", "TripDate", "FixedLocationID", "Temperature", "Salinity", "DissolvedOxygen", "pH", "Depth", "SampleDepth", "Secchi", "CollectionTime", "YSICalibration", "DataStatus", "DateProofed", "DateCompleted")
+SEWQ_columns <- c("SampleEventWQID", "SampleEventID", "TripDate", "FixedLocationID", "Temperature", "Salinity", "DissolvedOxygen", "pH", "Depth", "SampleDepth", "Secchi", "CollectionTime", "YSICalibration", "Comments", "DataStatus", "DateProofed", "DateCompleted")
 
 hsdbSampleEventWQ_sub <- hsdbSampleEventWQ %>% subset_columns(SEWQ_columns)
 dboSampleEventWQ_sub  <- dboSampleEventWQ  %>% subset_columns(SEWQ_columns)
 
 SampleEventWQ <- bind_rows(hsdbSampleEventWQ_sub, dboSampleEventWQ_sub)
 rm(hsdbSampleEventWQ, dboSampleEventWQ, hsdbSampleEventWQ_sub, dboSampleEventWQ_sub)
+
+WQ_meta <- metadata %>%
+  filter(TABLE_NAME == "SampleEventWQ" & COLUMN_NAME %in% SEWQ_columns) %>%
+  dplyr::select(-TABLE_SCHEMA) %>%
+  distinct()
 #
 #
 ## Survey counts
@@ -165,5 +275,158 @@ Srvy_columns <- c("QuadratID", "SampleEventID", "TripDate", "FixedLocationID", "
 hsdbSurveyQuadrat_sub <- hsdbSurveyQuadrat %>% subset_columns(Srvy_columns)
 dboSurveyQuadrat_sub  <- dboSurveyQuadrat  %>% subset_columns(Srvy_columns)
 
-SurveyQuads <- bind_rows(hsdbSampleEventWQ_sub, dboSampleEventWQ_sub)
+SurveyQuads <- bind_rows(hsdbSurveyQuadrat_sub, dboSurveyQuadrat_sub)
 rm(hsdbSurveyQuadrat, dboSurveyQuadrat, hsdbSurveyQuadrat_sub, dboSurveyQuadrat_sub)
+
+Survey_meta <- metadata %>%
+  filter(TABLE_NAME == "SurveyQuadrat" & COLUMN_NAME %in% Srvy_columns) %>%
+  dplyr::select(-TABLE_SCHEMA) %>%
+  distinct()
+#
+#
+#
+## Data cleaning for output ----
+#
+# Station information 
+FixedLocations <- dboFixedLocations %>%
+  dplyr::select(Estuary, SectionName, StationNumber, StartDate, EndDate, FixedLocationID)
+#
+# Sampling dates
+SampleEvent_df <- SampleEvent %>% 
+  left_join(
+    dboFixedLocations %>% dplyr::select(Estuary, SectionName, StationNumber, FixedLocationID)) %>%
+  dplyr::select(Estuary, 
+                SectionName, 
+                StationNumber, 
+                TripDate, 
+                Comments) %>%
+  arrange(TripDate,
+          SectionName,
+          StationNumber)
+#
+# Water quality 
+SE_WQ <- SampleEventWQ %>%
+  left_join(
+    dboFixedLocations %>% dplyr::select(Estuary, SectionName, StationNumber, FixedLocationID)) %>%
+  dplyr::filter(
+    is.na(Comments) |
+      !stringr::str_detect(
+      stringr::str_to_lower(Comments),
+      "same as|wq same|same wq")) %>%
+  dplyr::select(Estuary,
+                SectionName, 
+                StationNumber, 
+                TripDate, 
+                CollectionTime, 
+                Depth, 
+                SampleDepth, 
+                Secchi, 
+                Temperature, 
+                Salinity, 
+                DissolvedOxygen, 
+                pH,
+                YSICalibration, 
+                Comments) %>%
+  arrange(TripDate,
+          SectionName, 
+          StationNumber)
+#
+# Survey counts
+Counts <- SurveyQuads  %>%
+  left_join(
+    dboFixedLocations %>% dplyr::select(Estuary, SectionName, StationNumber, FixedLocationID)) %>%
+  dplyr::select(Estuary, 
+                SectionName, 
+                StationNumber, 
+                TripDate,
+                QuadratNumber,
+                NumLive,
+                NumDead,
+                Comments) %>%
+  arrange(TripDate, 
+          SectionName,
+          StationNumber, 
+          QuadratNumber)
+#
+#
+## Compile metadata ---- 
+#
+Metadata_base <- read.csv("Column_names_meta.csv")
+Data_comments <- read.csv("Data_comments.csv")
+
+
+# Functions to write data to Excel workbook ----
+write_metadata_to_excel <- function(datalist, file_path, sheet_name = "Metadata", space = 2) {
+  # datalist: named list of data frames
+  # file_path: where to save the Excel file
+  # space: number of empty rows between tables
+  
+  # Create new workbook
+  wb <- createWorkbook()
+  addWorksheet(wb, sheet_name)
+  
+  # Start writing at first row
+  start_row <- 1
+  
+  for(name in names(datalist)) {
+    df <- datalist[[name]]
+    
+    # Optionally add table name as header
+    if(!is.null(name)) {
+      writeData(wb, sheet = sheet_name, x = paste0("Table: ", name), startRow = start_row, startCol = 1)
+      start_row <- start_row + 1
+    }
+    
+    # Write the datatable itself
+    writeData(wb, sheet = sheet_name, x = df, startRow = start_row, startCol = 1, withFilter = TRUE)
+    
+    # Update start_row for next table
+    start_row <- start_row + nrow(df) + space + 1
+  }
+  
+  # Save workbook
+  saveWorkbook(wb, file = file_path, overwrite = TRUE)
+}
+add_tables_to_workbook <- function(wb, datalist, sheet_prefix = "Table", with_filter = TRUE) {
+  # wb: an existing openxlsx workbook object
+  # datalist: named or unnamed list of data.frames
+  # sheet_prefix: used if datalist is unnamed
+  # with_filter: add Excel filters to headers
+  
+  # Counter for unnamed sheets
+  counter <- 1
+  
+  for(name in names(datalist)) {
+    df <- datalist[[name]]
+    
+    # Determine sheet name
+    sheet_name <- if(!is.null(name) && nzchar(name)) {
+      name
+    } else {
+      paste0(sheet_prefix, "_", counter)
+    }
+    
+    # Make sure sheet name is unique (Excel allows max 31 chars)
+    sheet_name <- substr(sheet_name, 1, 31)
+    while(sheet_name %in% names(wb)) {
+      counter <- counter + 1
+      sheet_name <- substr(paste0(sheet_prefix, "_", counter), 1, 31)
+    }
+    
+    # Add worksheet and write data
+    addWorksheet(wb, sheet_name)
+    writeData(wb, sheet = sheet_name, x = df, withFilter = with_filter)
+    
+    counter <- counter + 1
+  }
+  
+  return(wb)
+}
+
+# Select tables to include:
+datatables <- list(
+  "Filtered Metadata" = dt1,
+  "Unique Metadata" = dt2
+)
+# Write meta to Excel
+write_metadata_to_excel(datatables, "Metadata.xlsx")

@@ -1,0 +1,35 @@
+﻿Tab,DatabaseColumn,Column,Description
+FixedLocations,FixedLocationID,FixedLocationID,Unique four character identifier for sample locations
+FixedLocations,Estuary,Estuary,Two character code for each estuary
+FixedLocations,SectionName,SectionName,One character code for estuary sections
+FixedLocations,Station number,Station number,Numerical designation for sample locations
+FixedLocations,LatitudeDec,Latitude (Decimal degrees),Latitude in decimal degrees
+FixedLocations,LongitudeDec,Longitude (Decimal degrees),Longitude in decimal degrees
+Recruitment,,Station number,Numerical designation for sample locations
+Recruitment,,FixedLocationID,Unique four character identifier for sample locations
+Recruitment,,SectionName,One character code for estuary sections
+Recruitment,,Date Deployed,Date T-Bar was deployed
+Recruitment,,Date Retrieved,Date T-Bar was retrieved
+Recruitment,,Replicate number,Refers to the T-Bar at a given station. Three are always deployed. Number indicates the order they were processed.
+Recruitment,,Shell position,"Position on the stringer from 1 (top) to 6 (bottom). Numbering is continuous, so the second stringer on the T continues 7 (top) to 12 (bottom). We only process the underside of the middle 4 shells on each stringer."
+Recruitment,,Number of spat,Number of spat counted.
+Recruitment,,Recruitment comments,"Comments explaining missing data, modifications to procedures, unexpected values or messages to analysts"
+SurveyQuadrat,QuadratID,QuadratID,Unique ID code for quadrat
+SurveyQuadrat,TripDate,Date,Date quadrat was collected
+SurveyQuadrat,Estuary,Estuary,Two character code for each estuary
+SurveyQuadrat,SectionName,SectionName,One character code for estuary sections
+SurveyQuadrat,FixedLocationID,FixedLocationID,Numerical designation for sample locations
+SurveyQuadrat,LatitudeDec,Latitude (Decimal degrees),Latitude in decimal degrees
+SurveyQuadrat,LongitudeDec,Longitude (Decimal degrees),Longitude in decimal degrees
+SurveyQuadrat,NumLive,Oysters / quadrat,Number of oysters observed in the quadrat
+SurveyQuadrat,NumDead,Drills / quadrat,Number of oyster drills observed in the quadrat
+SurveySH,ShellHeightID,ShellHeightID,Unique ID code for shell height measurement
+SurveySH,QuadratID,QuadratID,Unique ID code for quadrat
+SurveySH,Date,Date,Date quadrat was collected
+SurveySH,Estuary,Estuary,Two character code for each estuary
+SurveySH,SectionName,SectionName,One character code for estuary sections
+SurveySH,FixedLocationID,FixedLocationID,Numerical designation for sample locations
+SurveySH,LatitudeDec,Latitude (Decimal degrees),Latitude in decimal degrees
+SurveySH,LongitudeDec,Longitude (Decimal degrees),Longitude in decimal degrees
+SurveySH,,Shell Height (mm),Measure from umbo to furthest edge in millimeters
+SampleEvent,TripDate,TripDate,Date trip was conducted
