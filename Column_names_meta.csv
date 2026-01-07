@@ -2,7 +2,7 @@
 FixedLocations,FixedLocationID,FixedLocationID,Unique four character identifier for sample locations
 FixedLocations,Estuary,Estuary,Two character code for each estuary
 FixedLocations,SectionName,SectionName,One character code for estuary sections
-FixedLocations,Station number,Station number,Numerical designation for sample locations
+FixedLocations,StationNumber,Station number,Numerical designation for sample locations
 FixedLocations,LatitudeDec,Latitude (Decimal degrees),Latitude in decimal degrees
 FixedLocations,LongitudeDec,Longitude (Decimal degrees),Longitude in decimal degrees
 Recruitment,,Station number,Numerical designation for sample locations
@@ -33,3 +33,12 @@ SurveySH,LatitudeDec,Latitude (Decimal degrees),Latitude in decimal degrees
 SurveySH,LongitudeDec,Longitude (Decimal degrees),Longitude in decimal degrees
 SurveySH,,Shell Height (mm),Measure from umbo to furthest edge in millimeters
 SampleEvent,TripDate,TripDate,Date trip was conducted
+SampleEventWQ,CollectionTime,CollectionTime,Time at sampling
+SampleEventWQ,Depth,Depth,Water depth in meters
+SampleEventWQ,SampleDepth,SampleDepth,Depth of sample reading in meters
+SampleEventWQ,Secchi,Secchi,Depth of Secchi reading in meters
+SampleEventWQ,Temperature,Temperature,Water temperature in degrees Celsius
+SampleEventWQ,Salinity,Salinity,Salinity
+SampleEventWQ,DissolvedOxygen,DissolvedOxygen,Dissolved oxygen in mg/L
+SampleEventWQ,pH,pH,pH of sample
+SampleEventWQ,YSICalibration,YSICalibration,Calibration status of YSI 

@@ -1,6 +1,6 @@
-﻿DataTable,Filter,Comment,,
+﻿DataTable,Filter,Comment
 SurveyQuadrat,NA,"Calculate the mean shell height of live oysters for each station. For analysis of oyster density, multiply the live and dead oyster counts in each 0.25-m2 quadrat by 4 to extrapolate the number of oysters found per 1 m2. Use the extrapolated numbers from the 15 quadrats to calculate the mean live density and standard deviation per station. Divide the total number of dead oysters by the total number of live and dead oysters to calculate the dead:total oysters ratio for each sample. Calculate the mean dead:total oysters ratio per station. Alternatively, these data can be represented as:
-% live = (#live / (#live + #dead)) * 100",,
-SurveyQuadrat,CERP,Please note: Surveys from 2005 through 2007 were conducted using 1 m2 quadrats instead of 0.25 m2. quadrats. Numbers reflect oysters found within a quadrat regardless of quadrat size.,,
-SurveySH,AB,The first 50 oysters encountered in each quadrat were measured (Shell Height in millimeters),,
-SurveySH,CERP,The first 10 oysters encountered in each quadrat were measured (Shell Height in millimeters),,
+% live = (#live / (#live + #dead)) * 100"
+SurveyQuadrat,CERP,Please note: Surveys from 2005 through 2007 were conducted using 1 m2 quadrats instead of 0.25 m2. quadrats. Numbers reflect oysters found within a quadrat regardless of quadrat size.
+SurveySH,AB,The first 50 oysters encountered in each quadrat were measured (Shell Height in millimeters)
+SurveySH,CERP,The first 10 oysters encountered in each quadrat were measured (Shell Height in millimeters)
