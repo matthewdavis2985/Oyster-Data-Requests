@@ -21,12 +21,6 @@ pacman::p_load(tidyverse,
                lubridate,
                openxlsx)
 #
-library(dplyr)
-library(DBI)
-
-library(dplyr)
-library(DBI)
-
 get_metadata <- function(con, tables = NULL) {
   
   # ---- column structure & types ----
@@ -103,8 +97,6 @@ get_metadata <- function(con, tables = NULL) {
     ) %>%
     collect()
 }
-
-
 # 
 ## Database connection ----
 con <- dbConnect(odbc(),
@@ -126,7 +118,6 @@ tables <- tibble::tribble(
 )
 
 metadata <- get_metadata(con, tables)
-
 
 dboFixedLocations <- tbl(con,in_schema("dbo", "FixedLocations")) %>% 
   filter(Estuary %in% EstuaryCode)%>%
@@ -228,7 +219,7 @@ subset_columns <- function(df, cols) {
 }
 #
 ## Trip info
-Trip_columns <- c("TripID", "TripDate", "Comments", "DataStatus", "DateProofed", "DateCompleted")
+Trip_columns <- c("TripID", "TripDate", "Comments")
  
 hsdbTripInfo_sub <- hsdbTripInfo %>% subset_columns(Trip_columns)
 dboTripInfo_sub  <- dboTripInfo  %>% subset_columns(Trip_columns)
@@ -241,7 +232,7 @@ Trip_meta <- metadata %>%
   dplyr::select(-TABLE_SCHEMA)
 #
 ## SampleEvent
-SE_columns <- c("SampleEventID", "TripID", "FixedLocationID", "TripDate", "Comments", "DataStatus", "DateProofed", "DateCompleted")
+SE_columns <- c("SampleEventID", "TripID", "FixedLocationID", "TripDate", "Comments")
 
 hsdbSampleEvent_sub <- hsdbSampleEvent %>% subset_columns(SE_columns)
 dboSampleEvent_sub  <- dboSampleEvent  %>% subset_columns(SE_columns)
@@ -255,7 +246,7 @@ Event_meta <- metadata %>%
   distinct()
 #
 ## SampleEvent Water Quality
-SEWQ_columns <- c("SampleEventWQID", "SampleEventID", "TripDate", "FixedLocationID", "Temperature", "Salinity", "DissolvedOxygen", "pH", "Depth", "SampleDepth", "Secchi", "CollectionTime", "YSICalibration", "Comments", "DataStatus", "DateProofed", "DateCompleted")
+SEWQ_columns <- c("SampleEventWQID", "SampleEventID", "TripDate", "FixedLocationID", "Temperature", "Salinity", "DissolvedOxygen", "pH", "Depth", "SampleDepth", "Secchi", "CollectionTime", "YSICalibration", "Comments")
 
 hsdbSampleEventWQ_sub <- hsdbSampleEventWQ %>% subset_columns(SEWQ_columns)
 dboSampleEventWQ_sub  <- dboSampleEventWQ  %>% subset_columns(SEWQ_columns)
@@ -270,7 +261,7 @@ WQ_meta <- metadata %>%
 #
 #
 ## Survey counts
-Srvy_columns <- c("QuadratID", "SampleEventID", "TripDate", "FixedLocationID", "QuadratNumber", "NumLive", "NumDead", "Comments", "DataStatus", "DateProofed", "DateCompleted")
+Srvy_columns <- c("QuadratID", "SampleEventID", "TripDate", "FixedLocationID", "QuadratNumber", "NumLive", "NumDead", "Comments")
 
 hsdbSurveyQuadrat_sub <- hsdbSurveyQuadrat %>% subset_columns(Srvy_columns)
 dboSurveyQuadrat_sub  <- dboSurveyQuadrat  %>% subset_columns(Srvy_columns)
@@ -289,7 +280,14 @@ Survey_meta <- metadata %>%
 #
 # Station information 
 FixedLocations <- dboFixedLocations %>%
-  dplyr::select(Estuary, SectionName, StationNumber, StartDate, EndDate, FixedLocationID)
+  dplyr::select(Estuary, 
+                SectionName, 
+                StationNumber, 
+                StartDate, 
+                EndDate, 
+                FixedLocationID,
+                LatitudeDec,
+                LongitudeDec)
 #
 # Sampling dates
 SampleEvent_df <- SampleEvent %>% 
@@ -347,13 +345,18 @@ Counts <- SurveyQuads  %>%
           SectionName,
           StationNumber, 
           QuadratNumber)
+Counts <- Counts %>% 
+  dplyr::mutate(Comments = case_when(
+    substr(TripDate, 1, 4) %in% c("2005", "2006", "2007") ~ "CAUTION - 1 m2 quadrat used",
+    TRUE ~ Comments  # keep existing value for all other rows
+  ))
 #
 #
 ## Compile metadata ---- 
 #
 Metadata_base <- read.csv("Column_names_meta.csv")
-Data_comments <- read.csv("Data_comments.csv")
-
+Data_comments <- read.csv("Data_comments.csv") %>% 
+  dplyr::filter(Filter == "CERP" | is.na(Filter))
 
 # Functions to write data to Excel workbook ----
 write_metadata_to_excel <- function(datalist, file_path, sheet_name = "Metadata", space = 2) {
@@ -423,10 +426,38 @@ add_tables_to_workbook <- function(wb, datalist, sheet_prefix = "Table", with_fi
   return(wb)
 }
 
-# Select tables to include:
+# Name tables to include with data desired:
 datatables <- list(
-  "Filtered Metadata" = dt1,
-  "Unique Metadata" = dt2
+  "Locations" = Metadata_base %>% 
+    dplyr::filter(Tab == "FixedLocations") %>%
+    dplyr::select(-Column),
+  "Sample Event" = Metadata_base %>% 
+    dplyr::filter((Tab == "FixedLocations" | Tab == "SampleEvent") & DatabaseColumn %in% colnames(SampleEvent_df)) %>%
+    dplyr::select(-Column) %>%
+    dplyr::mutate(Tab = "SampleEvent") %>%
+    distinct(),
+  "Sample Water Quality" = Metadata_base %>% 
+    dplyr::filter(Tab == "SampleEventWQ") %>%
+    dplyr::select(-Column),
+  "Survey Counts" = Metadata_base %>% 
+    dplyr::filter(Tab == "SurveyQuadrat" & DatabaseColumn %in% colnames(Counts)) %>%
+    dplyr::select(-Column) 
 )
+
+#
 # Write meta to Excel
-write_metadata_to_excel(datatables, "Metadata.xlsx")
+write_metadata_to_excel(datatables, 
+                        paste0(folder_name,"/LakeWorth_Surveys_2005_2024.xlsx"), 
+                        space = 2)
+
+# New datatables to add
+datatables2 <- list(
+  "Locations" = FixedLocations,
+  "SampleEvent" = SampleEvent_df,
+  "WaterQuality" = SE_WQ,
+  "SurveyCounts" = Counts
+)
+#
+wb <- loadWorkbook(paste0(folder_name,"/LakeWorth_Surveys_2005_2024.xlsx"))
+wb <- add_tables_to_workbook(wb, datatables2)
+
