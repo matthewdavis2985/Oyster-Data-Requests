@@ -1,19 +1,19 @@
 ﻿Tab,DatabaseColumn,Column,Description
-FixedLocations,FixedLocationID,FixedLocationID,Unique four character identifier for sample locations
+FixedLocations,FixedLocationID,Fixed Location ID,Unique four character identifier for sample locations
 FixedLocations,Estuary,Estuary,Two character code for each estuary
-FixedLocations,SectionName,SectionName,One character code for estuary sections
-FixedLocations,StationNumber,Station number,Numerical designation for sample locations
+FixedLocations,SectionName,Section Name,One character code for estuary sections
+FixedLocations,StationNumber,Station Number,Numerical designation for sample locations
 FixedLocations,LatitudeDec,Latitude (Decimal degrees),Latitude in decimal degrees
 FixedLocations,LongitudeDec,Longitude (Decimal degrees),Longitude in decimal degrees
-Recruitment,,Station number,Numerical designation for sample locations
-Recruitment,,FixedLocationID,Unique four character identifier for sample locations
-Recruitment,,SectionName,One character code for estuary sections
-Recruitment,,Date Deployed,Date T-Bar was deployed
-Recruitment,,Date Retrieved,Date T-Bar was retrieved
-Recruitment,,Replicate number,Refers to the T-Bar at a given station. Three are always deployed. Number indicates the order they were processed.
-Recruitment,,Shell position,"Position on the stringer from 1 (top) to 6 (bottom). Numbering is continuous, so the second stringer on the T continues 7 (top) to 12 (bottom). We only process the underside of the middle 4 shells on each stringer."
-Recruitment,,Number of spat,Number of spat counted.
-Recruitment,,Recruitment comments,"Comments explaining missing data, modifications to procedures, unexpected values or messages to analysts"
+Recruitment,StationNumber,Station Number,Numerical designation for sample locations
+Recruitment,FixedLocationID,Fixed Location ID,Unique four character identifier for sample locations
+Recruitment,SectionName,Section Name,One character code for estuary sections
+Recruitment,DeployedDate,Date Deployed,Date T-Bar was deployed
+Recruitment,TripDate,Date Retrieved,Date T-Bar was retrieved
+Recruitment,ShellReplicate,Replicate Number,Refers to the T-Bar at a given station. Three are always deployed. Number indicates the order they were processed.
+Recruitment,ShellPosition,Shell Position,"Position on the stringer from 1 (top) to 6 (bottom). Numbering is continuous, so the second stringer on the T continues 7 (top) to 12 (bottom)"
+Recruitment,NumBottom,Bottom Number of Spat,Number of spat counted on the bottom surface of the shell
+Recruitment,NumTop,Top Number of Spat,Number of spat counted on the top surface of the shell
 SurveyQuadrat,QuadratID,QuadratID,Unique ID code for quadrat
 SurveyQuadrat,TripDate,Date,Date quadrat was collected
 SurveyQuadrat,Estuary,Estuary,Two character code for each estuary
