@@ -307,10 +307,11 @@ SE_WQ <- SampleEventWQ %>%
   left_join(
     dboFixedLocations %>% dplyr::select(Estuary, SectionName, StationNumber, FixedLocationID)) %>%
   dplyr::filter(
-    is.na(Comments) |
+    (is.na(Comments) |
       !stringr::str_detect(
       stringr::str_to_lower(Comments),
-      "same as|wq same|same wq")) %>%
+      "same as|wq same|same wq")) &
+      TripDate %in% SurveyQuads$TripDate) %>%
   dplyr::select(Estuary,
                 SectionName, 
                 StationNumber, 
@@ -359,32 +360,154 @@ Data_comments <- read.csv("Data_comments.csv") %>%
   dplyr::filter(Filter == "CERP" | is.na(Filter))
 
 # Functions to write data to Excel workbook ----
-write_metadata_to_excel <- function(datalist, file_path, sheet_name = "Metadata", space = 2) {
+write_metadata_to_excel <- function(datalist, file_path, sheet_name = "Metadata", space = 2, Data_comments = NULL) {
   # datalist: named list of data frames
   # file_path: where to save the Excel file
   # space: number of empty rows between tables
   
-  # Create new workbook
+  # Create workbook
   wb <- createWorkbook()
   addWorksheet(wb, sheet_name)
   
-  # Start writing at first row
+  # Styles
+  title_style  <- createStyle(textDecoration = "bold")
+  header_style <- createStyle(textDecoration = "bold")
+  note_style   <- createStyle(textDecoration = "italic", wrapText = TRUE, valign = "top")
+  
   start_row <- 1
+  max_cols  <- 1  # track widest table for auto-fit
   
   for(name in names(datalist)) {
-    df <- datalist[[name]]
     
-    # Optionally add table name as header
-    if(!is.null(name)) {
-      writeData(wb, sheet = sheet_name, x = paste0("Table: ", name), startRow = start_row, startCol = 1)
-      start_row <- start_row + 1
+    df <- datalist[[name]]
+    n_cols <- ncol(df)
+    max_cols <- max(max_cols, n_cols)
+    
+    # write table title (bold)
+    writeData(
+      wb,
+      sheet = sheet_name,
+      x = name,
+      startRow = start_row,
+      startCol = 1
+    )
+    
+    addStyle(
+      wb,
+      sheet = sheet_name,
+      style = title_style,
+      rows = start_row,
+      cols = 1,
+      gridExpand = TRUE,
+      stack = TRUE
+    )
+    
+    start_row <- start_row + 1
+    
+    # write table data
+    writeData(
+      wb,
+      sheet = sheet_name,
+      x = df,
+      startRow = start_row,
+      startCol = 1,
+      withFilter = FALSE
+    )
+    
+    # bold column headers
+    addStyle(
+      wb,
+      sheet = sheet_name,
+      style = header_style,
+      rows = start_row,
+      cols = 1:n_cols,
+      gridExpand = TRUE,
+      stack = TRUE
+    )
+    
+    start_row <- start_row + nrow(df) + 1
+    
+    # Add notes (if present)
+    if (!is.null(Data_comments)) {
+      
+      notes <- Data_comments %>%
+        filter(
+          gsub("\\s+", "", tolower(DataTable)) ==
+            gsub("\\s+", "", tolower(name))
+        ) %>%
+        dplyr::pull(Comment)
+      
+      if (length(notes) > 0) {
+        
+        writeData(
+          wb,
+          sheet_name,
+          x = "Notes:",
+          startRow = start_row,
+          startCol = 1
+        )
+        
+        addStyle(wb, sheet_name, title_style, start_row, 1)
+        
+        start_row <- start_row + 1
+        
+        for (note in notes) {
+          writeData(
+            wb,
+            sheet_name,
+            x = note,
+            startRow = start_row,
+            startCol = 1
+          )
+          
+          mergeCells(
+            wb,
+            sheet = sheet_name,
+            cols = 1:3,
+            rows = start_row
+          )
+          
+          addStyle(
+            wb,
+            sheet_name,
+            note_style,
+            start_row,
+            1:max_cols,
+            gridExpand = TRUE
+          )
+          
+          setRowHeights(
+            wb,
+            sheet = sheet_name,
+            rows = start_row,
+            heights = "auto"
+          )
+          
+          start_row <- start_row + 1
+        }
+        
+        start_row <- start_row + space
+      }
     }
     
-    # Write the datatable itself
-    writeData(wb, sheet = sheet_name, x = df, startRow = start_row, startCol = 1, withFilter = TRUE)
-    
-    # Update start_row for next table
-    start_row <- start_row + nrow(df) + space + 1
+    start_row <- start_row + space
+  }
+  
+  # set column widths
+  setColWidths(
+    wb,
+    sheet = sheet_name,
+    cols = 1,
+    widths = 22
+  )
+  
+  if (max_cols > 1) {
+    setColWidths(
+      wb,
+      sheet = sheet_name,
+      cols = 2:max_cols,
+      widths = "auto"
+    )
   }
   
   # Save workbook
@@ -418,7 +541,7 @@ add_tables_to_workbook <- function(wb, datalist, sheet_prefix = "Table", with_fi
     
     # Add worksheet and write data
     addWorksheet(wb, sheet_name)
-    writeData(wb, sheet = sheet_name, x = df, withFilter = with_filter)
+    writeData(wb, sheet = sheet_name, x = df, withFilter = FALSE)
     
     counter <- counter + 1
   }
@@ -439,7 +562,7 @@ datatables <- list(
   "Sample Water Quality" = Metadata_base %>% 
     dplyr::filter(Tab == "SampleEventWQ") %>%
     dplyr::select(-Column),
-  "Survey Counts" = Metadata_base %>% 
+  "Survey Quadrat" = Metadata_base %>% 
     dplyr::filter(Tab == "SurveyQuadrat" & DatabaseColumn %in% colnames(Counts)) %>%
     dplyr::select(-Column) 
 )
@@ -448,7 +571,8 @@ datatables <- list(
 # Write meta to Excel
 write_metadata_to_excel(datatables, 
                         paste0(folder_name,"/LakeWorth_Surveys_2005_2024.xlsx"), 
-                        space = 2)
+                        space = 2,
+                        Data_comments = Data_comments %>% dplyr::select(-Filter))
 
 # New datatables to add
 datatables2 <- list(
@@ -460,4 +584,7 @@ datatables2 <- list(
 #
 wb <- loadWorkbook(paste0(folder_name,"/LakeWorth_Surveys_2005_2024.xlsx"))
 wb <- add_tables_to_workbook(wb, datatables2)
+saveWorkbook(wb,
+             file = paste0(folder_name, "/LakeWorth_Surveys_2005_2024.xlsx"),
+             overwrite = TRUE)
 
