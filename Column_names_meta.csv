@@ -32,6 +32,10 @@ SurveySH,FixedLocationID,FixedLocationID,Numerical designation for sample locati
 SurveySH,LatitudeDec,Latitude (Decimal degrees),Latitude in decimal degrees
 SurveySH,LongitudeDec,Longitude (Decimal degrees),Longitude in decimal degrees
 SurveySH,,Shell Height (mm),Measure from umbo to furthest edge in millimeters
+SampleEventWQ,Estuary,Estuary,Two character code for each estuary
+SampleEventWQ,SectionName,SectionName,One character code for estuary sections
+SampleEventWQ,StationNumber,Station number,Numerical designation for sample locations
+SampleEventWQ,TripDate,TripDate,Date trip was conducted
 SampleEvent,TripDate,TripDate,Date trip was conducted
 SampleEventWQ,CollectionTime,CollectionTime,Time at sampling
 SampleEventWQ,Depth,Depth,Water depth in meters
