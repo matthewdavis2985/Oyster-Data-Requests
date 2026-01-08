@@ -28,4 +28,9 @@ Within each folder, please include the following: <br>
 1. Correspondence of request as an Outlook item. It is helpful to include the request and your response so that future requests can be handled similarly.
 2. SQL query or RMarkdown code that can be executed to fulfill response. It is up to the data manager's preference for what language to use for the request. You should use a single file to fulfill the request to make future, similar requests easy to duplicate
 3. Request output. Typically, requests should be fulfilled with one or more Excel file. Use of tabs, joins, other file types, etc. are at the discretion of the data manager and the requestor.
-4. Metadata. Each request should contain metadata providing information on each data field. This metadata can usually be found in the DataDictionary table. Placement of the metadata, whether in a tab in the request output or within the corresponce are at the discretion of the data manager.
+4. Metadata. Each request should contain metadata providing information on each data field. This metadata can usually be found in the DataDictionary table. Placement of the metadata, whether in a tab in the request output or within the correspondence are at the discretion of the data manager.
+
+HELP FILES:
+Excel files have been created to streamline the addition of metadata and comments to data requests and to assist with consistent wording:<br>
+Column_names_meta: Relates clean column names to original data table column names, by = TableName
+Data_comments: Assists with adding consistent data or project comments to metadata output. Table can be filtered by data table name and by project name. 
