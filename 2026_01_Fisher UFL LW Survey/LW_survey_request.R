@@ -114,7 +114,9 @@ tables <- tibble::tribble(
   "hsdb", "SampleEventWQ",
   "dbo", "SampleEventWQ",
   "hsdb", "SurveyQuadrat",
-  "dbo", "SurveyQuadrat"
+  "dbo", "SurveyQuadrat",
+  "hsdb", "SurveySH",
+  "dbo", "SurveySH"
 )
 
 metadata <- get_metadata(con, tables)
@@ -205,6 +207,31 @@ dboSurveyQuadrat <- tbl(con,in_schema("dbo", "SurveyQuadrat")) %>%
       DataStatus == "Proofed")  %>%
   collect()
 
+hsdbSurveySH <- tbl(con,in_schema("hsdb", "SurveySH")) %>% 
+  mutate(
+    TripDate = as.Date(substring(QuadratID, 8, 15)),
+    FixedLocationID = substring(QuadratID, 19, 22),
+    QuadratNumber = substring(QuadratID, 26, 27),
+    SHNumber = substring(ShellHeightID, 29, 31)) %>%
+  filter(
+    substring(QuadratID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date) %>%
+  collect()
+
+dboSurveySH <- tbl(con,in_schema("dbo", "SurveySH")) %>% 
+  mutate(
+    TripDate = as.Date(substring(QuadratID, 8, 15)),
+    FixedLocationID = substring(QuadratID, 19, 22),
+    QuadratNumber = substring(QuadratID, 26, 27),
+    SHNumber = substring(ShellHeightID, 29, 31)) %>%
+  filter(
+    substring(QuadratID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date & 
+      DataStatus == "Proofed") %>%
+  collect()
+
 DBI::dbDisconnect(con)
 #
 #
@@ -264,7 +291,7 @@ WQ_meta <- metadata %>%
 Srvy_columns <- c("QuadratID", "SampleEventID", "TripDate", "FixedLocationID", "QuadratNumber", "NumLive", "NumDead", "Comments")
 
 hsdbSurveyQuadrat_sub <- hsdbSurveyQuadrat %>% subset_columns(Srvy_columns)
-dboSurveyQuadrat_sub  <- dboSurveyQuadrat  %>% subset_columns(Srvy_columns)
+dboSurveyQuadrat_sub  <- dboSurveyQuadrat  %>% subset_columns(Srvy_columns) 
 
 SurveyQuads <- bind_rows(hsdbSurveyQuadrat_sub, dboSurveyQuadrat_sub)
 rm(hsdbSurveyQuadrat, dboSurveyQuadrat, hsdbSurveyQuadrat_sub, dboSurveyQuadrat_sub)
@@ -272,6 +299,23 @@ rm(hsdbSurveyQuadrat, dboSurveyQuadrat, hsdbSurveyQuadrat_sub, dboSurveyQuadrat_
 Survey_meta <- metadata %>%
   filter(TABLE_NAME == "SurveyQuadrat" & COLUMN_NAME %in% Srvy_columns) %>%
   dplyr::select(-TABLE_SCHEMA) %>%
+  distinct()
+#
+#
+## Survey SHs
+SrvySH_columns <- c("ShellHeightID", "QuadratID", "ShellHeight", "QuadratNumber", "SHNumber", "TripDate", "FixedLocationID", "Comments")
+
+hsdbSurveySH_sub <- hsdbSurveySH %>% subset_columns(SrvySH_columns)
+dboSurveySH_sub  <- dboSurveySH  %>% subset_columns(SrvySH_columns) %>%
+  mutate(ShellHeight = as.numeric(ShellHeight))
+
+SurveySHs <- bind_rows(hsdbSurveySH_sub, dboSurveySH_sub)
+rm(hsdbSurveySH, dboSurveySH, hsdbSurveySH_sub, dboSurveySH_sub)
+
+SurveySH_meta <- metadata %>%
+  filter(TABLE_NAME == "SurveySH" & COLUMN_NAME %in% SrvySH_columns) %>%
+  dplyr::select(-TABLE_SCHEMA) %>% 
+  dplyr::filter(!(COLUMN_NAME == "ShellHeight" & DATA_TYPE == "varchar")) %>%
   distinct()
 #
 #
@@ -352,6 +396,29 @@ Counts <- Counts %>%
     TRUE ~ Comments  # keep existing value for all other rows
   ))
 #
+# Survey SHs
+Heights <- SurveySHs  %>%
+  left_join(
+    dboFixedLocations %>% dplyr::select(Estuary, SectionName, StationNumber, FixedLocationID)) %>%
+  dplyr::select(Estuary, 
+                SectionName, 
+                StationNumber, 
+                TripDate,
+                QuadratNumber,
+                SHNumber,
+                ShellHeight,
+                Comments) %>%
+  arrange(TripDate, 
+          SectionName,
+          StationNumber, 
+          QuadratNumber,
+          SHNumber)
+Heights <- Heights %>% 
+  dplyr::mutate(Comments = case_when(
+    substr(TripDate, 1, 4) %in% c("2005", "2006", "2007") ~ "NOTE - 1 m2 quadrat used, up to 50 SHs measured",
+    TRUE ~ Comments  # keep existing value for all other rows
+  ))
+#
 #
 ## Compile metadata ---- 
 #
@@ -365,28 +432,63 @@ write_metadata_to_excel <- function(datalist, file_path, sheet_name = "Metadata"
   # file_path: where to save the Excel file
   # space: number of empty rows between tables
   
+  EXCEL_MAX_ROWS <- 1048576
+  
   # Create workbook
   wb <- createWorkbook()
-  addWorksheet(wb, sheet_name)
-  
+
   # Styles
   title_style  <- createStyle(textDecoration = "bold")
   header_style <- createStyle(textDecoration = "bold")
   note_style   <- createStyle(textDecoration = "italic", wrapText = TRUE, valign = "top")
   
+  sheet_index <- 1
+  current_sheet <- sheet_name
+  addWorksheet(wb, current_sheet)
+  
   start_row <- 1
   max_cols  <- 1  # track widest table for auto-fit
+  sheets_used <- current_sheet
+  
+  new_sheet <- function() {
+    sheet_index <<- sheet_index + 1
+    current_sheet <<- paste0(sheet_name, "_", sheet_index)
+    addWorksheet(wb, current_sheet)
+    sheets_used <<- c(sheets_used, current_sheet)
+    start_row <<- 1
+  }
   
   for(name in names(datalist)) {
     
     df <- datalist[[name]]
+    n_rows <- nrow(df)
     n_cols <- ncol(df)
     max_cols <- max(max_cols, n_cols)
+    
+    
+    # Estimate rows needed (title + header + data + spacing)
+    notes <- character(0)
+    if (!is.null(Data_comments)) {
+      notes <- Data_comments %>%
+        filter(
+          gsub("\\s+", "", tolower(DataTable)) ==
+            gsub("\\s+", "", tolower(name))
+        ) %>%
+        pull(Comment)
+    }
+    
+    rows_needed <- 1 + 1 + n_rows + 1 +
+      if (length(notes) > 0) length(notes) + 2 else 0 +
+      space
+    
+    if (start_row + rows_needed > EXCEL_MAX_ROWS) {
+      new_sheet()
+    }
     
     # write table title (bold)
     writeData(
       wb,
-      sheet = sheet_name,
+      sheet = current_sheet,
       x = name,
       startRow = start_row,
       startCol = 1
@@ -407,7 +509,7 @@ write_metadata_to_excel <- function(datalist, file_path, sheet_name = "Metadata"
     # write table data
     writeData(
       wb,
-      sheet = sheet_name,
+      sheet = current_sheet,
       x = df,
       startRow = start_row,
       startCol = 1,
@@ -417,7 +519,7 @@ write_metadata_to_excel <- function(datalist, file_path, sheet_name = "Metadata"
     # bold column headers
     addStyle(
       wb,
-      sheet = sheet_name,
+      sheet = current_sheet,
       style = header_style,
       rows = start_row,
       cols = 1:n_cols,
@@ -425,92 +527,75 @@ write_metadata_to_excel <- function(datalist, file_path, sheet_name = "Metadata"
       stack = TRUE
     )
     
-    start_row <- start_row + nrow(df) + 1
+    start_row <- start_row + n_rows + 1
     
     # Add notes (if present)
-    if (!is.null(Data_comments)) {
+    if (length(notes) > 0) {
       
-      notes <- Data_comments %>%
-        filter(
-          gsub("\\s+", "", tolower(DataTable)) ==
-            gsub("\\s+", "", tolower(name))
-        ) %>%
-        dplyr::pull(Comment)
+      writeData(
+        wb,
+        current_sheet,
+        x = "Notes:",
+        startRow = start_row,
+        startCol = 1
+      )
+      addStyle(wb, current_sheet, title_style, start_row, 1)
+      start_row <- start_row + 1
       
-      if (length(notes) > 0) {
+      for (note in notes) {
+        
+        if (start_row >= EXCEL_MAX_ROWS) {
+          new_sheet()
+        }
         
         writeData(
           wb,
-          sheet_name,
-          x = "Notes:",
+          current_sheet,
+          x = note,
           startRow = start_row,
           startCol = 1
         )
         
-        addStyle(wb, sheet_name, title_style, start_row, 1)
+        mergeCells(
+          wb,
+          sheet = current_sheet,
+          cols = 1:max(3, max_cols),
+          rows = start_row
+        )
+        
+        addStyle(
+          wb,
+          current_sheet,
+          note_style,
+          start_row,
+          1:max_cols,
+          gridExpand = TRUE
+        )
+        
+        setRowHeights(
+          wb,
+          sheet = current_sheet,
+          rows = start_row,
+          heights = "auto"
+        )
         
         start_row <- start_row + 1
-        
-        for (note in notes) {
-          writeData(
-            wb,
-            sheet_name,
-            x = note,
-            startRow = start_row,
-            startCol = 1
-          )
-          
-          mergeCells(
-            wb,
-            sheet = sheet_name,
-            cols = 1:3,
-            rows = start_row
-          )
-          
-          addStyle(
-            wb,
-            sheet_name,
-            note_style,
-            start_row,
-            1:max_cols,
-            gridExpand = TRUE
-          )
-          
-          setRowHeights(
-            wb,
-            sheet = sheet_name,
-            rows = start_row,
-            heights = "auto"
-          )
-          
-          start_row <- start_row + 1
-        }
-        
-        start_row <- start_row + space
       }
+      
+      start_row <- start_row + space
     }
     
     start_row <- start_row + space
   }
   
-  # set column widths
-  setColWidths(
-    wb,
-    sheet = sheet_name,
-    cols = 1,
-    widths = 22
-  )
-  
-  if (max_cols > 1) {
-    setColWidths(
-      wb,
-      sheet = sheet_name,
-      cols = 2:max_cols,
-      widths = "auto"
-    )
+  # ---- Column widths on all sheets ----
+  for (s in sheets_used) {
+    setColWidths(wb, s, cols = 1, widths = 22)
+    if (max_cols > 1) {
+      setColWidths(wb, s, cols = 2:max_cols, widths = "auto")
+    }
   }
   
-  # Save workbook
   saveWorkbook(wb, file = file_path, overwrite = TRUE)
 }
 add_tables_to_workbook <- function(wb, datalist, sheet_prefix = "Table", with_filter = TRUE) {
@@ -519,29 +604,63 @@ add_tables_to_workbook <- function(wb, datalist, sheet_prefix = "Table", with_fi
   # sheet_prefix: used if datalist is unnamed
   # with_filter: add Excel filters to headers
   
+  EXCEL_MAX_ROWS <- 1048576
+  HEADER_ROWS    <- 1
+  DATA_ROWS_MAX  <- EXCEL_MAX_ROWS - HEADER_ROWS
+  
   # Counter for unnamed sheets
   counter <- 1
   
   for(name in names(datalist)) {
     df <- datalist[[name]]
+    n <- nrow(df)
     
     # Determine sheet name
-    sheet_name <- if(!is.null(name) && nzchar(name)) {
+    base_name <- if(!is.null(name) && nzchar(name)) {
       name
     } else {
       paste0(sheet_prefix, "_", counter)
     }
     
     # Make sure sheet name is unique (Excel allows max 31 chars)
-    sheet_name <- substr(sheet_name, 1, 31)
-    while(sheet_name %in% names(wb)) {
-      counter <- counter + 1
-      sheet_name <- substr(paste0(sheet_prefix, "_", counter), 1, 31)
-    }
+    base_name <- substr(base_name, 1, 31)
+    # Number of chunks needed
+    n_chunks <- ceiling(n / DATA_ROWS_MAX)
     
-    # Add worksheet and write data
-    addWorksheet(wb, sheet_name)
-    writeData(wb, sheet = sheet_name, x = df, withFilter = FALSE)
+    for (i in seq_len(n_chunks)) {
+      
+      start <- (i - 1) * DATA_ROWS_MAX + 1
+      end   <- min(i * DATA_ROWS_MAX, n)
+      
+      df_chunk <- df[start:end, , drop = FALSE]
+      
+      sheet_name <- if (n_chunks == 1) {
+        base_name
+      } else {
+        substr(paste0(base_name, "_", i), 1, 31)
+      }
+      
+      # Ensure uniqueness in workbook
+      original_name <- sheet_name
+      suffix <- 1
+    while(sheet_name %in% names(wb)) {
+      sheet_name <- substr(
+        paste0(original_name, "_", suffix),
+        1,
+        31
+      )
+      suffix <- suffix + 1
+    }
+      
+      addWorksheet(wb, sheet_name)
+      
+      writeData(
+        wb,
+        sheet = sheet_name,
+        x = df_chunk,
+        withFilter = with_filter
+      )
+    }
     
     counter <- counter + 1
   }
@@ -567,10 +686,23 @@ datatables <- list(
     dplyr::select(-Column) 
 )
 
+datatablesb <- list(
+  "Shell Heights" = Metadata_base %>%
+    dplyr::filter(Tab == "SurveySH" & DatabaseColumn %in% colnames(Heights))  %>%
+    dplyr::mutate(
+      DatabaseColumn = factor(DatabaseColumn, levels = colnames(Heights))
+    ) %>%
+    dplyr::arrange(DatabaseColumn) %>%
+    dplyr::select(-Column)
+)
 #
 # Write meta to Excel
 write_metadata_to_excel(datatables, 
-                        paste0(folder_name,"/LakeWorth_Surveys_2005_2024.xlsx"), 
+                        paste0(folder_name,"/LakeWorth_Surveys_2005_2025.xlsx"), 
+                        space = 2,
+                        Data_comments = Data_comments %>% dplyr::select(-Filter))
+write_metadata_to_excel(datatablesb, 
+                        paste0(folder_name,"/LakeWorth_Survey_SHs_2005_2025.xlsx"), 
                         space = 2,
                         Data_comments = Data_comments %>% dplyr::select(-Filter))
 
@@ -581,10 +713,18 @@ datatables2 <- list(
   "WaterQuality" = SE_WQ,
   "SurveyCounts" = Counts
 )
+datatables2b <- list(
+  "ShellHeights" = Heights
+)
 #
-wb <- loadWorkbook(paste0(folder_name,"/LakeWorth_Surveys_2005_2024.xlsx"))
+wb <- loadWorkbook(paste0(folder_name,"/LakeWorth_Surveys_2005_2025.xlsx"))
 wb <- add_tables_to_workbook(wb, datatables2)
 saveWorkbook(wb,
-             file = paste0(folder_name, "/LakeWorth_Surveys_2005_2024.xlsx"),
+             file = paste0(folder_name, "/LakeWorth_Surveys_2005_2025.xlsx"),
              overwrite = TRUE)
 
+wb <- loadWorkbook(paste0(folder_name,"/LakeWorth_Survey_SHs_2005_2025.xlsx"))
+wb <- add_tables_to_workbook(wb, datatables2b)
+saveWorkbook(wb,
+             file = paste0(folder_name, "/LakeWorth_Survey_SHs_2005_2025.xlsx"),
+             overwrite = TRUE)

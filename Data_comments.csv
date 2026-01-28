@@ -3,8 +3,8 @@ SurveyQuadrat,NA,"Calculate the mean shell height of live oysters for each stati
 % live = (#live / (#live + #dead)) * 100"
 SurveyQuadrat,CERP,Each survey consists of 15 quadrats per sampling event
 SurveyQuadrat,CERP,Please note: Surveys from 2005 through 2007 were conducted using 1 m2 quadrats instead of 0.25 m2 quadrats. Numbers reflect oysters found within a quadrat regardless of quadrat size.
-SurveySH,AB,The first 50 oysters encountered in each quadrat were measured (Shell Height in millimeters)
-SurveySH,CERP,The first 10 oysters encountered in each quadrat were measured (Shell Height in millimeters)
+Shell Heights,AB,The first 50 oysters encountered in each quadrat were measured (Shell Height in millimeters)
+Shell Heights,CERP,"During surveys conducted from 2005 through 2007, the first 50 live oysters encountered in each quadrat were measured (shell height in mm). From 2008 through current surveys, the first 10 live oysters encountered in each quadrat were measured. If no live oysters were found in the qudarat, no shell height was recorded and a NULL placeholder row exists in the database. "
 Location,CERP,"Sampling is perfomed at fixed locations. Each sample is assigned to a fixed station for  reference, even if sampling occurs randomly within a fixed location. Sometimes a station needs to be moved. Station numbers may or may not change, but FixedLocationID always changes when the Latitude or Longitude changes."
 Recruitment,NA,Each row of data represents one shell on a stringer
 Recruitment,CERP,Three spat arrays are deployed per station with two stringers per array. Shells are numbered sequentially from top to bottom within each array. Only the underside of the middle 4 (2-5 and 8-11) shells on each stringer are included in recruitment analysis. 

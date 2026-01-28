@@ -21,8 +21,10 @@ SurveyQuadrat,SectionName,SectionName,One character code for estuary sections
 SurveyQuadrat,FixedLocationID,FixedLocationID,Numerical designation for sample locations
 SurveyQuadrat,LatitudeDec,Latitude (Decimal degrees),Latitude in decimal degrees
 SurveyQuadrat,LongitudeDec,Longitude (Decimal degrees),Longitude in decimal degrees
-SurveyQuadrat,NumLive,Oysters / quadrat,Number of oysters observed in the quadrat
-SurveyQuadrat,NumDead,Drills / quadrat,Number of oyster drills observed in the quadrat
+SurveyQuadrat,NumLive,Live oysters / quadrat,Number of live oysters observed in the quadrat
+SurveyQuadrat,NumDead,Dead oysters / quadrat,Number of dead oysters observed in the quadrat
+SurveyQuadrat,NumDrills,Drills / quadrat,Number of oyster drills observed in the quadrat
+SurveyQuadrat,QuadratNumber,QuadratNumber,Quadrat number within sampling event
 SurveySH,ShellHeightID,ShellHeightID,Unique ID code for shell height measurement
 SurveySH,QuadratID,QuadratID,Unique ID code for quadrat
 SurveySH,Date,Date,Date quadrat was collected
@@ -31,7 +33,11 @@ SurveySH,SectionName,SectionName,One character code for estuary sections
 SurveySH,FixedLocationID,FixedLocationID,Numerical designation for sample locations
 SurveySH,LatitudeDec,Latitude (Decimal degrees),Latitude in decimal degrees
 SurveySH,LongitudeDec,Longitude (Decimal degrees),Longitude in decimal degrees
-SurveySH,,Shell Height (mm),Measure from umbo to furthest edge in millimeters
+SurveySH,ShellHeight,Shell Height,Measure from umbo to furthest edge in millimeters
+SurveySH,QuadratNumber,QuadratNumber,Quadrat number within sampling event
+SurveySH,SHNumber,SHNumber,Shell height number within quadrat
+SurveySH,StationNumber,Station Number,Numerical designation for sample locations
+SurveySH,TripDate,Date,Date shell height was collected
 SampleEventWQ,Estuary,Estuary,Two character code for each estuary
 SampleEventWQ,SectionName,SectionName,One character code for estuary sections
 SampleEventWQ,StationNumber,Station number,Numerical designation for sample locations
