@@ -1,5 +1,5 @@
--- Data request for Whitney Scheffel (PPBEP) February 2025
--- Providing Location, Water Quality, Recruitment, and Sedimentation data for Pensacola Bay 2022-01-01 to 2024-12-31 
+-- Data request for Whitney Scheffel (PPBEP) March 2026
+-- Providing Location, Water Quality, and Recruitment data for Pensacola Bay 2022-01-01 to 2025-12-31 
 
 ----------------------------------------------------------------------------------------
 -- Select Location data 
@@ -104,47 +104,3 @@ order by
 	Recruitment.ShellReplicate,
 	Recruitment.ShellPosition;
 
-
-----------------------------------------------------------------------------------------
--- Select Sediment data
-----------------------------------------------------------------------------------------
-
-select 
-	FixedLocations.StationNumber as 'Station number',
-	FixedLocations.FixedLocationID,
-	SedimentTrap.DeployedDate as 'Date Deployed',
-	TripInfo.TripDate as 'Date Retrieved',
-	SedimentTrap.CupSampleID as 'CupSampleID',
-	SedimentTrap.FilterTareWeight as 'Filter Tare Weight (g)',
-	SedimentTrap.PanTareWeight as 'Pan Tare Weight (g)',
-	SedimentTrap.FilterDryWeight as 'Filter Dry Weight (g)',
-	SedimentTrap.PanDryWeight as 'Pan Dry Weight (g)',
-	SedimentTrap.NumDrills as 'Number of Drills',
-	SedimentTrap.NumCrabs as 'Number of Crabs',
-	SedimentTrap.NumHermitCrabs as 'Number of Hermit Crabs',
-	SedimentTrap.NumFish as 'Number of Fish',
-	SedimentTrap.NumOtherBiota as 'Number of Other Biota',
-	SedimentTrap.Comments as 'Sediment trap comments'
-
-from 
-	hsdb.TripInfo
-
-join
-	hsdb.SampleEvent
-	ON
-	TripInfo.TripID=SampleEvent.TripID
-join
-	dbo.FixedLocations
-	ON
-	FixedLocations.FixedLocationID=SampleEvent.FixedLocationID
-join
-	hsdb.SedimentTrap
-	ON
-	SampleEvent.SampleEventID=SedimentTrap.SampleEventID
-
-where
-	TripInfo.TripID like 'PESDTP%' 
-	
-order by
-	SedimentTrap.SampleEventID,
-	SedimentTrap.CupSampleID
