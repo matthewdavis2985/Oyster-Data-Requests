@@ -52,3 +52,6 @@ SampleEventWQ,Salinity,Salinity,Salinity
 SampleEventWQ,DissolvedOxygen,DissolvedOxygen,Dissolved oxygen in mg/L
 SampleEventWQ,pH,pH,pH of sample
 SampleEventWQ,YSICalibration,YSICalibration,Calibration status of YSI 
+Dermo,SampleNumber,SampleNumber,Sequential oyster sample number ID
+Repro,SampleNumber,SampleNumber,Sequential oyster sample number ID
+ConditionIndex,SampleNumber,SampleNumber,Sequential oyster sample number ID
