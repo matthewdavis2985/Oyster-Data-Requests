@@ -1,0 +1,127 @@
+---
+title: "2026_06_USF_CI"
+output: html_document
+---
+
+# Data request for Greg Herbert (USF) and Keith Dawson (Ecological Associates)
+# providing statewide Condition index data
+
+```{r VariableSet, echo = FALSE, warning = FALSE, message = FALSE}
+# Set your variables
+Database = "OysterLocalMD20260603"
+Server = "localhost\\LOCALSQL"
+```
+
+```{r PackageLoad, echo = FALSE, warning = FALSE, message = FALSE}
+# Load necessary R packages and configure chunks
+library(tidyverse)
+library(odbc)
+library(DBI)
+library(dbplyr)
+library(lubridate)
+library(knitr)
+library(openxlsx)
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+```
+
+
+```{r DatabaseDownload}
+# Connect to Local database server and pull all necessary data, then close connection 
+con <- dbConnect(odbc(),
+                    Driver = "SQL Server", 
+                    Server = Server,
+                    Database = Database,
+                    Authentication = "ActiveDirectoryIntegrated")
+
+DataDictionary <- tbl(con,in_schema("dbo", "DataDictionary")) %>%
+  collect
+
+dboFixedLocations <- tbl(con,in_schema("dbo", "FixedLocations")) %>%
+  collect() 
+
+hsdbSampleEvent <- tbl(con,in_schema("hsdb", "SampleEvent")) %>%
+  collect() 
+  
+hsdbCI <- tbl(con,in_schema("hsdb", "ConditionIndex")) %>%
+  collect() 
+
+DBI::dbDisconnect(con)
+
+```
+
+```{r DataFilters}
+# Filter data frames so that only data collected from Collections trips in the specified Estuary, in the correct date range, which have been Proofed, are present.
+FixedLocations <- dboFixedLocations %>% 
+  mutate(StationNumber = as.numeric(StationNumber),
+         FixedLat = LatitudeDec,
+         FixedLon = LongitudeDec) %>% 
+  select(FixedLocationID, Estuary, SectionName, StationNumber, FixedLat, FixedLon) %>% 
+  distinct()
+          
+SampleEvent1 <- hsdbSampleEvent %>% 
+  mutate(TripDate = as.Date(substring(SampleEventID, 8, 15), format = "%Y%m%d"),
+         FixedLocationID = substring(SampleEventID, 19, 22)) %>%
+  filter(substring(SampleEventID,3,6) == "COLL") %>%
+  left_join(FixedLocations, SampleEvent1, by = c("FixedLocationID")) %>%
+  mutate(LatitudeDec = coalesce(LatitudeDec, FixedLat),
+         LongitudeDec = coalesce(LongitudeDec, FixedLon)) %>%
+  arrange(Estuary, TripDate, StationNumber) %>%
+  select(
+    SampleEventID, FixedLocationID, TripDate,
+    LatitudeDec, LongitudeDec,
+    Estuary, SectionName, StationNumber,
+    Comments, AdminNotes
+  )
+
+hsdbCI <- hsdbCI %>% 
+  mutate(TripDate = as.Date(substring(SampleEventID, 8, 15), format = "%Y%m%d"),
+         FixedLocationID = substring(SampleEventID, 19, 22)) %>%
+  arrange(OysterID) %>%
+  select(
+    OysterID, SampleEventID, FixedLocationID, 
+    ShellHeight, ShellLength, ShellWidth, 
+    TotalWeight, TarePanWeight, TissueWetWeight, ShellWetWeight,
+    TissueDryWeight, ShellDryWeight,
+    Comments, AdminNotes
+  )
+
+DataDictionary1 <- DataDictionary %>%
+  filter(SchemaName != "NFWF") %>%
+  filter(SchemaName != "dbo") %>%
+  filter(TableName == "SampleEvent" | TableName == "ConditionIndex") %>%
+  distinct(SortOrder, TableName, ColumnName, Required, DefaultValue, Definition) %>%
+  arrange(TableName, SortOrder) %>%
+  filter(ColumnName != "DataStatus", ColumnName != "DateEntered"  , ColumnName != "EnteredBy" ,
+           ColumnName != "DateProofed" , ColumnName != "ProofedBy" ,
+           ColumnName != "DateCompleted" , ColumnName != "CompletedBy",
+         ColumnName != "OldSampleNumber",
+         ColumnName != "NumDrills", ColumnName != "HarvestStatus", ColumnName != "TripID"
+         ) %>%
+  select(-SortOrder)
+
+```
+
+``` {r Exporting data}
+
+datafile = paste(Sys.Date(), "USF_CI.xlsx", sep = "_")
+
+# Generate the Data file
+  write.xlsx(list(
+    "SampleEvent" = SampleEvent1, 
+    "ConditionIndex" = hsdbCI, 
+    "MetaData" = DataDictionary1),
+  file = datafile, colNames = TRUE)
+ # Open the workbook for further customization
+  wb <- loadWorkbook(datafile)
+  # Auto-adjust column widths
+  setColWidths(wb, sheet = "SampleEvent", cols = 1:ncol(SampleEvent1), widths = "auto")
+  setColWidths(wb, sheet = "ConditionIndex", cols = 1:ncol(hsdbCI), widths = "auto")
+  setColWidths(wb, sheet = "MetaData", cols = 1:ncol(DataDictionary1), widths = "auto")
+  # Save the modified workbook
+  saveWorkbook(wb, datafile, overwrite = TRUE)
+
+
+
+```
