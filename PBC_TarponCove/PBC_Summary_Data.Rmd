@@ -1,0 +1,898 @@
+---
+title: "PBC Tarpon Cove"
+author: "EWilliams"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Data request for Palm Beach County Tarpon Cove report providing Lake Worth data and summary tables
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,  warning = FALSE, message = FALSE)
+#
+folder_name <- "../PBC_TarponCove"
+start_date <- as.Date("2025-01-01")
+end_date <- as.Date("2025-12-31")
+Database <- "Oysters_26-06-25"
+Server <- "localhost\\ERICALOCALSQL"
+EstuaryCode <- c("LW")
+#
+if (!require("pacman")) {install.packages("pacman")}
+pacman::p_load(tidyverse,
+               odbc,
+               DBI, 
+               dbplyr, 
+               lubridate,
+               openxlsx)
+#
+#
+```
+
+
+```{r formulas and metadata setup}
+#
+tables <- tibble::tribble(
+  ~TABLE_SCHEMA, ~TABLE_NAME,
+  "dbo", "FixedLocations",
+  "dbo",  "TripInfo",
+  "hsdb", "SurveyQuadrat",
+  "dbo", "SurveyQuadrat",
+  "hsdb", "SurveySH",
+  "dbo", "SurveySH",
+  "hsdb", "Dermo",
+  "dbo", "Dermo",
+  "hsdb", "Recruitment",
+  "dbo", "Recruitment",
+  "hsdb", "SedimentTrap",
+  "dbo", "SedimentTrap",
+  "dbo", "DataDictionary"
+)
+#
+get_metadata <- function(con, tables = NULL) {
+  
+  # ---- column structure & types ----
+  cols <- tbl(con, in_schema("INFORMATION_SCHEMA", "COLUMNS")) %>%
+    select(
+      TABLE_SCHEMA,
+      TABLE_NAME,
+      COLUMN_NAME,
+      DATA_TYPE,
+      ORDINAL_POSITION
+    )
+  
+  # ---- column descriptions (SQL Server specific) ----
+  descriptions <- tbl(con, in_schema("sys", "columns")) %>%
+    rename(COLUMN_NAME = name) %>%
+    inner_join(
+      tbl(con, in_schema("sys", "tables")) %>%
+        rename(TABLE_NAME = name),
+      by = "object_id"
+    ) %>%
+    inner_join(
+      tbl(con, in_schema("sys", "schemas")) %>%
+        rename(TABLE_SCHEMA = name),
+      by = "schema_id"
+    ) %>%
+    left_join(
+      tbl(con, in_schema("sys", "extended_properties")) %>%
+        filter(name == "MS_Description"),
+      by = c(
+        "object_id" = "major_id",
+        "column_id" = "minor_id"
+      )
+    ) %>%
+    select(
+      TABLE_SCHEMA,
+      TABLE_NAME,
+      COLUMN_NAME,
+      DESCRIPTION = value
+    )
+  
+  # ---- optionally limit to specific tables ----
+  if (!is.null(tables)) {
+    tables <- tables %>%
+      select(TABLE_SCHEMA, TABLE_NAME)
+    
+    tables_sql <- copy_to(con, tables, overwrite = TRUE)
+    
+    cols <- cols %>%
+      inner_join(
+        tables_sql,
+        by = c("TABLE_SCHEMA", "TABLE_NAME")
+      )
+    
+    descriptions <- descriptions %>%
+      inner_join(
+        tables_sql,
+        by = c("TABLE_SCHEMA", "TABLE_NAME")
+      )
+  }
+  
+  # ---- combine & return ----
+  cols %>%
+    left_join(
+      descriptions,
+      by = c("TABLE_SCHEMA", "TABLE_NAME", "COLUMN_NAME")
+    ) %>%
+    arrange(TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION) %>%
+    select(
+      TABLE_SCHEMA,
+      TABLE_NAME,
+      COLUMN_NAME,
+      DATA_TYPE,
+      DESCRIPTION
+    ) %>%
+    collect()
+}
+#
+# Function to subset to desired columns:
+subset_columns <- function(df, cols) {
+  df %>%
+    mutate(across(setdiff(cols, names(.)), ~ NA)) %>%  # add missing
+    select(all_of(cols))
+}
+#
+# Functions to write data to Excel workbook 
+write_metadata_to_excel <- function(datalist, file_path, sheet_name = "Metadata", space = 2, Data_comments = NULL) {
+  # datalist: named list of data frames
+  # file_path: where to save the Excel file
+  # space: number of empty rows between tables
+  
+  EXCEL_MAX_ROWS <- 1048576
+  
+  # Create workbook if needed
+  if (file.exists(file_path)) {
+  wb <- loadWorkbook(file_path)
+} else {
+  wb <- createWorkbook()
+}
+  
+  # Styles
+  title_style  <- createStyle(textDecoration = "bold")
+  header_style <- createStyle(textDecoration = "bold")
+  note_style   <- createStyle(textDecoration = "italic", wrapText = TRUE, valign = "top")
+  
+  sheet_index <- 1
+  current_sheet <- sheet_name
+  addWorksheet(wb, current_sheet)
+  
+  start_row <- 1
+  max_cols  <- 1  # track widest table for auto-fit
+  sheets_used <- current_sheet
+  
+  new_sheet <- function() {
+    sheet_index <<- sheet_index + 1
+    current_sheet <<- paste0(sheet_name, "_", sheet_index)
+    addWorksheet(wb, current_sheet)
+    sheets_used <<- c(sheets_used, current_sheet)
+    start_row <<- 1
+  }
+  
+  for(name in names(datalist)) {
+    
+    df <- datalist[[name]]
+    n_rows <- nrow(df)
+    n_cols <- ncol(df)
+    max_cols <- max(max_cols, n_cols)
+    
+    
+    # Estimate rows needed (title + header + data + spacing)
+    notes <- character(0)
+    if (!is.null(Data_comments)) {
+      notes <- Data_comments %>%
+        filter(
+          gsub("\\s+", "", tolower(DataTable)) ==
+            gsub("\\s+", "", tolower(name))
+        ) %>%
+        pull(Comment)
+    }
+    
+    rows_needed <- 1 + 1 + n_rows + 1 +
+      if (length(notes) > 0) length(notes) + 2 else 0 +
+      space
+    
+    if (start_row + rows_needed > EXCEL_MAX_ROWS) {
+      new_sheet()
+    }
+    
+    # write table title (bold)
+    writeData(
+      wb,
+      sheet = current_sheet,
+      x = name,
+      startRow = start_row,
+      startCol = 1
+    )
+    
+    addStyle(
+      wb,
+      sheet = current_sheet,
+      style = title_style,
+      rows = start_row,
+      cols = 1,
+      gridExpand = TRUE,
+      stack = TRUE
+    )
+    
+    start_row <- start_row + 1
+    
+    # write table data
+    writeData(
+      wb,
+      sheet = current_sheet,
+      x = df,
+      startRow = start_row,
+      startCol = 1,
+      withFilter = FALSE
+    )
+    
+    # bold column headers
+    addStyle(
+      wb,
+      sheet = current_sheet,
+      style = header_style,
+      rows = start_row,
+      cols = 1:n_cols,
+      gridExpand = TRUE,
+      stack = TRUE
+    )
+    
+    start_row <- start_row + n_rows + 1
+    
+    # Add notes (if present)
+    if (length(notes) > 0) {
+      
+      writeData(
+        wb,
+        current_sheet,
+        x = "Notes:",
+        startRow = start_row,
+        startCol = 1
+      )
+      addStyle(wb, current_sheet, title_style, start_row, 1)
+      start_row <- start_row + 1
+      
+      for (note in notes) {
+        
+        if (start_row >= EXCEL_MAX_ROWS) {
+          new_sheet()
+        }
+        
+        writeData(
+          wb,
+          current_sheet,
+          x = note,
+          startRow = start_row,
+          startCol = 1
+        )
+        
+        mergeCells(
+          wb,
+          sheet = current_sheet,
+          cols = 1:max(3, max_cols),
+          rows = start_row
+        )
+        
+        addStyle(
+          wb,
+          current_sheet,
+          note_style,
+          start_row,
+          1:max_cols,
+          gridExpand = TRUE
+        )
+        
+        setRowHeights(
+          wb,
+          sheet = current_sheet,
+          rows = start_row,
+          heights = "auto"
+        )
+        
+        start_row <- start_row + 1
+      }
+      
+      start_row <- start_row + space
+    }
+    
+    start_row <- start_row + space
+  }
+  
+  # ---- Column widths on all sheets ----
+  for (s in sheets_used) {
+    setColWidths(wb, s, cols = 1, widths = 22)
+    if (max_cols > 1) {
+      setColWidths(wb, s, cols = 2:max_cols, widths = "auto")
+    }
+  }
+  
+  saveWorkbook(wb, file = file_path, overwrite = TRUE)
+}
+#
+add_tables_to_workbook <- function(wb, datalist, sheet_prefix = "Table", with_filter = TRUE) {
+  # wb: an existing openxlsx workbook object
+  # datalist: named or unnamed list of data.frames
+  # sheet_prefix: used if datalist is unnamed
+  # with_filter: add Excel filters to headers
+  
+  EXCEL_MAX_ROWS <- 1048576
+  HEADER_ROWS    <- 1
+  DATA_ROWS_MAX  <- EXCEL_MAX_ROWS - HEADER_ROWS
+  
+  # Counter for unnamed sheets
+  counter <- 1
+  
+  for(name in names(datalist)) {
+    df <- datalist[[name]]
+    n <- nrow(df)
+    
+    # Determine sheet name
+    base_name <- if(!is.null(name) && nzchar(name)) {
+      name
+    } else {
+      paste0(sheet_prefix, "_", counter)
+    }
+    
+    # Make sure sheet name is unique (Excel allows max 31 chars)
+    base_name <- substr(base_name, 1, 31)
+    # Number of chunks needed
+    n_chunks <- ceiling(n / DATA_ROWS_MAX)
+    
+    for (i in seq_len(n_chunks)) {
+      
+      start <- (i - 1) * DATA_ROWS_MAX + 1
+      end   <- min(i * DATA_ROWS_MAX, n)
+      
+      df_chunk <- df[start:end, , drop = FALSE]
+      
+      sheet_name <- if (n_chunks == 1) {
+        base_name
+      } else {
+        substr(paste0(base_name, "_", i), 1, 31)
+      }
+      
+      # Ensure uniqueness in workbook
+      original_name <- sheet_name
+      suffix <- 1
+      while(sheet_name %in% names(wb)) {
+        sheet_name <- substr(
+          paste0(original_name, "_", suffix),
+          1,
+          31
+        )
+        suffix <- suffix + 1
+      }
+      
+      addWorksheet(wb, sheet_name)
+      
+      writeData(
+        wb,
+        sheet = sheet_name,
+        x = df_chunk,
+        withFilter = with_filter
+      )
+    }
+    
+    counter <- counter + 1
+  }
+  
+  return(wb)
+}
+#
+#
+#
+#
+#
+```
+
+
+```{r database download}
+# Connect to Local database server and pull all necessary data, then close connection 
+con <- dbConnect(odbc(),
+                    Driver = "SQL Server", 
+                    Server = Server,
+                    Database = Database,
+                    Authentication = "ActiveDirectoryIntegrated")
+#
+metadata <- get_metadata(con, tables)
+#
+# General info
+dboDataDictionary <- tbl(con,in_schema("dbo", "DataDictionary")) %>%
+  dplyr::select(SortOrder, SchemaName, TableName, ColumnName, DataType, Definition) %>%
+  collect()
+#
+dboFixedLocations <- tbl(con,in_schema("dbo", "FixedLocations")) %>% 
+  filter(Estuary %in% EstuaryCode)%>%
+  collect() 
+#
+# Trip info
+hsdbTripInfo <- tbl(con,in_schema("hsdb", "TripInfo")) %>%
+  filter(substring(TripID,1,2) %in% EstuaryCode & 
+           TripDate >= start_date & 
+           TripDate <= end_date & 
+           substring(TripID,3,6) == "SRVY") %>%
+  collect() 
+dboTripInfo <- tbl(con,in_schema("dbo", "TripInfo")) %>%
+  filter(substring(TripID,1,2) %in% EstuaryCode & 
+           TripDate >= start_date & 
+           TripDate <= end_date & 
+           substring(TripID,3,6) == "SRVY" & 
+           DataStatus == "Proofed") %>%
+  collect() 
+#
+# Sample Info 
+hsdbSampleEvent <- tbl(con,in_schema("hsdb", "SampleEvent")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(SampleEventID, 19, 22)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date & 
+      substring(SampleEventID,3,6) == "SRVY") %>%
+  collect() 
+dboSampleEvent <- tbl(con,in_schema("dbo", "SampleEvent")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(SampleEventID, 19, 22)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date & 
+      substring(SampleEventID,3,6) == "SRVY" & 
+      DataStatus == "Proofed") %>%
+  collect() 
+#
+# Survey data
+hsdbSurveyQuadrat <- tbl(con,in_schema("hsdb", "SurveyQuadrat")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(QuadratID, 19, 22)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date & 
+      substring(SampleEventID,3,6) == "SRVY") %>%
+  collect() 
+dboSurveyQuadrat <- tbl(con,in_schema("dbo", "SurveyQuadrat")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(QuadratID, 19, 22)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date & 
+      substring(SampleEventID,3,6) == "SRVY" & 
+      DataStatus == "Proofed")  %>%
+  collect()
+#
+hsdbSurveySH <- tbl(con,in_schema("hsdb", "SurveySH")) %>% 
+  mutate(
+    TripDate = as.Date(substring(QuadratID, 8, 15)),
+    FixedLocationID = substring(QuadratID, 19, 22),
+    QuadratNumber = substring(QuadratID, 26, 27),
+    SHNumber = substring(ShellHeightID, 29, 31)) %>%
+  filter(
+    substring(QuadratID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date) %>%
+  collect()
+dboSurveySH <- tbl(con,in_schema("dbo", "SurveySH")) %>% 
+  mutate(
+    TripDate = as.Date(substring(QuadratID, 8, 15)),
+    FixedLocationID = substring(QuadratID, 19, 22),
+    QuadratNumber = substring(QuadratID, 26, 27),
+    SHNumber = substring(ShellHeightID, 29, 31)) %>%
+  filter(
+    substring(QuadratID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date & 
+      DataStatus == "Proofed") %>%
+  collect()
+#
+# Dermo data
+hsdbDermo <- tbl(con,in_schema("hsdb", "Dermo")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(SampleEventID, 19, 22),
+    SampleNumber = substring(OysterID, 10, 11)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date) %>%
+  collect()
+dboDermo <- tbl(con,in_schema("dbo", "Dermo")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(SampleEventID, 19, 22),
+    SampleNumber = substring(OysterID, 10, 11)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date & 
+      DataStatus == "Proofed") %>%
+  collect()
+#
+# Recruitment data
+hsdbRcrt <- tbl(con,in_schema("hsdb", "Recruitment")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(SampleEventID, 19, 22)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date) %>%
+  collect()
+dboRcrt <- tbl(con,in_schema("dbo", "Recruitment")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(SampleEventID, 19, 22)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date & 
+      DataStatus == "Proofed") %>%
+  collect()
+#
+# Sediment data
+hsdbSedi <- tbl(con,in_schema("hsdb", "SedimentTrap")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(SampleEventID, 19, 22),
+    SampleNumber = substring(CupSampleID, 9, 12)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date) %>%
+  collect()
+dboSedi <- tbl(con,in_schema("dbo", "SedimentTrap")) %>% 
+  mutate(
+    TripDate = as.Date(substring(SampleEventID, 8, 15)),
+    FixedLocationID = substring(SampleEventID, 19, 22),
+    SampleNumber = substring(CupSampleID, 9, 12)) %>%
+  filter(
+    substring(SampleEventID,1,2) %in% EstuaryCode & 
+      TripDate >= start_date & 
+      TripDate <= end_date & 
+      DataStatus == "Proofed") %>%
+  collect()
+#
+#
+DBI::dbDisconnect(con)
+#
+```
+
+
+```{r data cleaning}
+#
+## Survey counts
+Srvy_columns <- c("QuadratID", "SampleEventID", "QuadratNumber", "NumLive", "NumDead", "FixedLocationID", "TripDate")
+
+hsdbSurveyQuadrat_sub <- hsdbSurveyQuadrat %>% subset_columns(Srvy_columns)
+dboSurveyQuadrat_sub  <- dboSurveyQuadrat  %>% subset_columns(Srvy_columns) 
+
+SurveyQuads <- bind_rows(hsdbSurveyQuadrat_sub, dboSurveyQuadrat_sub)
+rm(hsdbSurveyQuadrat, dboSurveyQuadrat, hsdbSurveyQuadrat_sub, dboSurveyQuadrat_sub)
+
+Survey_meta <- dboDataDictionary %>% 
+  filter(TableName == "SurveyQuadrat" & ColumnName %in% Srvy_columns) %>%
+  arrange(SortOrder) %>%
+  dplyr::select(-c("SortOrder", "SchemaName")) %>%
+  distinct()
+#
+SrvyData <- SurveyQuads %>%
+  left_join(dboFixedLocations %>%
+              dplyr::select(FixedLocationID, Estuary, SectionName, StationName, StationNumber)) %>%
+  mutate(Live_m2 = NumLive * 4,
+         Dead_m2 = NumDead * 4) %>%
+  relocate(TripDate, .after = everything())
+#
+#
+## Survey SHs
+SrvySH_columns <- c("ShellHeightID", "QuadratID", "ShellHeight", "QuadratNumber", "SHNumber", "TripDate", "FixedLocationID")
+
+hsdbSurveySH_sub <- hsdbSurveySH %>% subset_columns(SrvySH_columns)
+dboSurveySH_sub  <- dboSurveySH  %>% subset_columns(SrvySH_columns) %>%
+  mutate(ShellHeight = as.numeric(ShellHeight))
+
+SurveySHs <- bind_rows(hsdbSurveySH_sub, dboSurveySH_sub)
+rm(hsdbSurveySH, dboSurveySH, hsdbSurveySH_sub, dboSurveySH_sub)
+
+SurveySH_meta <- metadata %>%
+  filter(TABLE_NAME == "SurveySH" & COLUMN_NAME %in% SrvySH_columns) %>%
+  dplyr::select(-TABLE_SCHEMA) %>% 
+  dplyr::filter(!(COLUMN_NAME == "ShellHeight" & DATA_TYPE == "varchar")) %>%
+  distinct() 
+colnames(SurveySH_meta) <- colnames(Survey_meta)
+#
+SrvySHData <- SurveySHs %>%
+  left_join(dboFixedLocations %>%
+              dplyr::select(FixedLocationID, Estuary, SectionName, StationName, StationNumber)) %>%
+  relocate(TripDate, .after = everything())
+#
+#
+## Dermo 
+Dermo_columns <- c("OysterID", "SampleEventID", "ShellHeight", "TotalWeight", "ShellWetWeight", "DermoMantle", "DermoGill", "TripDate", "FixedLocationID", "SampleNumber")
+
+hsdbDermo_sub <- hsdbDermo %>% subset_columns(Dermo_columns)
+dboDermo_sub  <- dboDermo  %>% subset_columns(Dermo_columns) 
+
+Dermo_t <- bind_rows(hsdbDermo_sub, dboDermo_sub)
+rm(hsdbDermo, dboDermo, hsdbDermo_sub, dboDermo_sub)
+
+Dermo_meta <- dboDataDictionary %>% 
+  filter(TableName == "Dermo" & ColumnName %in% Dermo_columns) %>%
+  arrange(SortOrder) %>%
+  dplyr::select(-c("SortOrder", "SchemaName")) %>%
+  distinct()
+#
+DermoData <- Dermo_t %>%
+  left_join(dboFixedLocations %>%
+              dplyr::select(FixedLocationID, Estuary, SectionName, StationName, StationNumber)) %>%
+  relocate(TripDate, .after = everything())
+#
+#
+## Recruitment 
+Rcrt_columns <- c("ShellID", "SampleEventID", "DeployedDate", "ShellReplicate", "ShellPosition", "NumTop", "NumBottom", "TripDate", "FixedLocationID")
+
+hsdbRcrt_sub <- hsdbRcrt %>% subset_columns(Rcrt_columns)
+dboRcrt_sub  <- dboRcrt  %>% subset_columns(Rcrt_columns) 
+
+Rcrt_t <- bind_rows(hsdbRcrt_sub, dboRcrt_sub)
+rm(hsdbRcrt, dboRcrt, hsdbRcrt_sub, dboRcrt_sub)
+
+Rcrt_meta <- dboDataDictionary %>% 
+  filter(TableName == "Recruitment" & ColumnName %in% Rcrt_columns) %>%
+  arrange(SortOrder) %>%
+  dplyr::select(-c("SortOrder", "SchemaName")) %>%
+  distinct()
+#
+RcrtData <- Rcrt_t %>%
+  left_join(dboFixedLocations %>%
+              dplyr::select(FixedLocationID, Estuary, SectionName, StationName, StationNumber)) %>%
+  relocate(TripDate, .after = everything())
+#
+#
+## Sediment 
+Sedi_columns <- c("CupSampleID", "SampleEventID", "DeployedDate", "PanDryWeight", "PanTareWeight", "FilterDryWeight", "FilterTareWeight", "CrucibleDW", "TareCrucible", "PortionofSample", "AshWeight", "TripDate", "FixedLocationID", "SampleNumber")
+
+hsdbSedi_sub <- hsdbSedi %>% subset_columns(Sedi_columns)
+dboSedi_sub  <- dboSedi  %>% subset_columns(Sedi_columns) 
+
+Sedi_t <- bind_rows(hsdbSedi_sub, dboSedi_sub)
+rm(hsdbSedi, dboSedi, hsdbSedi_sub, dboSedi_sub)
+
+Sedi_meta <- dboDataDictionary %>% 
+  filter(TableName == "Sediment" & ColumnName %in% Sedi_columns) %>%
+  arrange(SortOrder) %>%
+  dplyr::select(-c("SortOrder", "SchemaName")) %>%
+  distinct()
+#
+SediData <- Sedi_t %>%
+  left_join(dboFixedLocations %>%
+              dplyr::select(FixedLocationID, Estuary, SectionName, StationName, StationNumber)) %>%
+  relocate(TripDate, .after = everything())
+#
+#
+#
+#
+```
+
+
+```{r data summary}
+#
+# Table of data outline
+outline <- data.frame(
+  Label = c("Data pulled:", "Pulled for:", "Start date:", "End date:"),
+  Value = c(paste(Sys.Date()), "Tarpon Cove Report", paste0(format(start_date, "%Y"),"-", format(start_date, "%m")), paste0(format(end_date, "%Y"),"-", format(end_date, "%m"))))
+#
+# Survey counts
+Live_counts <- SrvyData %>%
+  mutate(SurveyDate = paste0(substr(TripDate, 6, 7), "/01/", substr(TripDate, 1 ,4))) %>%
+  group_by(SurveyDate, StationName) %>%
+  summarise(LiveMean = round(mean(Live_m2, na.rm = T),2),
+            LiveSD = round(sd(Live_m2, na.rm = T), 2),
+            .groups = "drop") %>%
+  pivot_wider(names_from = StationName, values_from = c(LiveMean, LiveSD), names_glue = "{StationName}_{.value}") %>%
+  dplyr::select(SurveyDate, sort(setdiff(names(.), "SurveyDate")))
+#
+Dead_counts <- SrvyData %>%
+  mutate(SurveyDate = paste0(substr(TripDate, 6, 7), "/01/", substr(TripDate, 1 ,4)),
+         DeadRatio = as.numeric(Dead_m2/(Live_m2+Dead_m2))) %>%
+  group_by(SurveyDate, StationName) %>%
+  summarise(DeadRatioMean = round(mean(DeadRatio, na.rm = T),2),
+            DeadRatioSD = round(sd(DeadRatio, na.rm = T), 2),
+            .groups = "drop") %>%
+  pivot_wider(names_from = StationName, values_from = c(DeadRatioMean, DeadRatioSD), names_glue = "{StationName}_{.value}") %>%
+  dplyr::select(SurveyDate, sort(setdiff(names(.), "SurveyDate")))
+#
+# Survey SHs
+SHs <- SrvySHData %>%
+  mutate(SurveyDate = paste0(substr(TripDate, 6, 7), "/01/", substr(TripDate, 1 ,4))) %>%
+  group_by(SurveyDate, StationName) %>%
+  summarise(SHMean = round(mean(ShellHeight, na.rm = T),2),
+            SHSD = round(sd(ShellHeight, na.rm = T), 2),
+            .groups = "drop") %>%
+  pivot_wider(names_from = StationName, values_from = c(SHMean, SHSD), names_glue = "{StationName}_{.value}") %>%
+  dplyr::select(SurveyDate, sort(setdiff(names(.), "SurveyDate")))
+# 
+# Dermo
+Dermo <- DermoData %>%
+  mutate(DermoMean = rowMeans(.[, c("DermoMantle", "DermoGill")], na.rm = TRUE),
+         DermoSum = as.numeric(ifelse(rowSums(select(., contains("Dermo"))) >0, 1, 0))) %>%
+  group_by(TripDate, StationName) %>%
+  summarise(Mean = round(mean(DermoMean, na.rm = T),2),
+            SD = round(sd(DermoMean, na.rm = T), 2),
+            Pct = (sum(DermoSum, na.rm = TRUE)/n())*100,
+            .groups = "drop") %>%
+  pivot_wider(names_from = StationName, values_from = c(Mean, SD, Pct), names_glue = "{StationName}_{.value}") %>%
+  #dplyr::select(TripDate, sort(setdiff(names(.), "TripDate"))) %>%
+  dplyr::select(all_of(intersect(
+    c("TripDate", sprintf("%s_%s", 
+                          rep(sort(unique(DermoData$StationName)), each = 3), 
+                          c("Mean", "SD", "Pct"))), 
+    names(.))))
+#
+# Recruitment
+Rcrt <- RcrtData %>%
+  mutate(DaysDeployed = as.numeric(as.Date(TripDate) - as.Date(DeployedDate)), 
+         NumTop = case_when(ShellPosition %in% c(1, 6, 7, 12) ~ NA_real_,
+                            TRUE ~ NumTop),
+         NumBottom = case_when(ShellPosition %in% c(1, 6, 7, 12) ~ NA_real_,
+                            TRUE ~ NumBottom)) %>%
+  mutate(BottomMonth = NumBottom/(DaysDeployed/28)) %>%
+  group_by(TripDate, StationName) %>%
+  summarise(Mean = round(mean(BottomMonth, na.rm = T),2),
+            SD = round(sd(BottomMonth, na.rm = T), 2),
+            .groups = "drop") %>%
+  pivot_wider(names_from = StationName, values_from = c(Mean, SD), names_glue = "{StationName}_{.value}") %>%
+  dplyr::select(TripDate, sort(setdiff(names(.), "TripDate")))
+#
+#
+# Sediment
+Sedi <- SediData %>%
+  mutate(TotalDW = (PanDryWeight - PanTareWeight) + (FilterDryWeight - FilterTareWeight),
+         Proportion = round((CrucibleDW-TareCrucible)/((PanDryWeight - PanTareWeight) + (FilterDryWeight - FilterTareWeight)),3),
+         TotalAsh = case_when(is.na(Proportion) ~(AshWeight - TareCrucible)*(1/PortionofSample), TRUE ~ (AshWeight - TareCrucible)*(1/Proportion)),
+         PctOrganic = ((TotalDW-round(TotalAsh,3))/TotalDW)*100,
+         OrganicWt = TotalDW*(PctOrganic/100)) %>%
+  group_by(TripDate, StationName) %>%
+  summarise(Mean = round(mean(TotalDW, na.rm = T),2),
+            SD = round(sd(TotalDW, na.rm = T), 2),
+            .groups = "drop") %>%
+  pivot_wider(names_from = StationName, values_from = c(Mean, SD), names_glue = "{StationName}_{.value}") %>%
+  dplyr::select(TripDate, sort(setdiff(names(.), "TripDate")))
+#
+
+#
+#
+```
+
+
+```{r Excel file output}
+#
+Excelfile <- paste0("LW_Summary_Data_",
+                    format(start_date, "%Y"), format(start_date, "%m"), "_",
+                    format(end_date, "%Y"), format(end_date, "%m"),
+                    ".xlsx")
+#
+#
+# Compile metadata
+Metadata_base <- read.csv("../Column_names_meta.csv")
+Data_comments <- read.csv("../Data_comments.csv") %>% 
+  dplyr::filter(Filter == "CERP" | is.na(Filter))
+#
+datatables <- list(
+  "Data outline" = outline, 
+  "Locations" = Metadata_base %>% 
+    dplyr::filter(Tab == "FixedLocations") %>%
+    dplyr::select(-Column),
+  "Survey Quadrat" = bind_rows(
+      Metadata_base %>% 
+        dplyr::filter(Tab == "SurveyQuadrat" & DatabaseColumn %in% colnames(SrvyData)) %>%
+        dplyr::select(-Column),
+      Survey_meta %>%
+        filter(ColumnName %in% colnames(SrvyData) & !(ColumnName %in% Metadata_base$DatabaseColumn)) %>%
+        dplyr::select(-DataType) %>%
+        transmute(
+          Tab = TableName,
+          DatabaseColumn = ColumnName,
+          Description = Definition
+        )),
+  "Survey Shell Height" = bind_rows(
+      Metadata_base %>% 
+        dplyr::filter(Tab == "SurveySH" & DatabaseColumn %in% colnames(SrvySHData)) %>%
+        dplyr::select(-Column),
+      SurveySH_meta %>%
+        filter(ColumnName %in% colnames(SrvySHData) & !(ColumnName %in% Metadata_base$DatabaseColumn)) %>%
+        dplyr::select(-DataType) %>%
+        transmute(
+          Tab = TableName,
+          DatabaseColumn = ColumnName,
+          Description = Definition
+        )),
+  "Dermo" = bind_rows(
+    Metadata_base %>% 
+      dplyr::filter(Tab == "Dermo" & DatabaseColumn %in% colnames(Dermo_t)) %>%
+      dplyr::select(-Column),
+    Dermo_meta %>%
+      filter(ColumnName %in% colnames(Dermo_t) & !(ColumnName %in% Metadata_base$DatabaseColumn)) %>%
+      dplyr::select(-DataType) %>%
+      transmute(
+        Tab = TableName,
+        DatabaseColumn = ColumnName,
+        Description = Definition
+      )),
+  "Recruitment" = bind_rows(
+    Metadata_base %>% 
+      dplyr::filter(Tab == "Recruitment" & DatabaseColumn %in% colnames(Rcrt_t)) %>%
+      dplyr::select(-Column),
+    Rcrt_meta %>%
+      filter(ColumnName %in% colnames(Rcrt) & !(ColumnName %in% Metadata_base$DatabaseColumn)) %>%
+      dplyr::select(-DataType) %>%
+      transmute(
+        Tab = TableName,
+        DatabaseColumn = ColumnName,
+        Description = Definition
+      )),
+  "Sediment" = bind_rows(
+    Metadata_base %>% 
+      dplyr::filter(Tab == "Sediment" & DatabaseColumn %in% colnames(Sedi_t)) %>%
+      dplyr::select(-Column),
+    Sedi_meta %>%
+      filter(ColumnName %in% colnames(Sedi) & !(ColumnName %in% Metadata_base$DatabaseColumn)) %>%
+      dplyr::select(-DataType) %>%
+      transmute(
+        Tab = TableName,
+        DatabaseColumn = ColumnName,
+        Description = Definition
+      ))
+)
+#
+# Write meta to Excel
+write_metadata_to_excel(datatables, 
+                        paste0(folder_name,"/", Excelfile), 
+                        sheet_name = "Metadata",
+                        space = 2,
+                        Data_comments = Data_comments %>% dplyr::select(-Filter))
+#
+# Add summary tables:
+datatables2 <- list(
+  "Survey Live" = Live_counts,
+  "Survey Dead" = Dead_counts,
+  "Survey SH" = SHs,
+  "Dermo" = Dermo,
+  "Recruitment" = Rcrt,
+  "Sedimentation Rate" = Sedi)
+#
+# Add data tables:
+datatables3 <- list(
+  "SurveyCounts" = SrvyData,
+  "SurveySH" = SrvySHData,
+  "Dermo" = Dermo_t,
+  "Rcrt" = Rcrt_t,
+  "Sdtp" = Sedi_t
+)
+#
+#
+write_metadata_to_excel(datatables2, 
+                        paste0(folder_name,"/", Excelfile), 
+                        sheet_name = "Summary",
+                        space = 1)
+#
+wb <- loadWorkbook(paste0(folder_name,"/", Excelfile))
+wb <- add_tables_to_workbook(wb, datatables3)
+# Auto-adjust column widths
+setColWidths(wb, sheet = "SurveyCounts", cols = 1:ncol(SrvyData), widths = "auto")
+setColWidths(wb, sheet = "SurveySH", cols = 1:ncol(SrvySHData), widths = "auto")
+setColWidths(wb, sheet = "Dermo", cols = 1:ncol(Dermo), widths = "auto")
+setColWidths(wb, sheet = "Rcrt", cols = 1:ncol(Rcrt), widths = "auto")
+setColWidths(wb, sheet = "Sdtp", cols = 1:ncol(Sedi), widths = "auto")
+# Save the modified workbook
+saveWorkbook(wb, Excelfile, overwrite = TRUE)
+#
+#  
+#
+```
+
+Data was saved to `r paste0(folder_name,"/", Excelfile)`

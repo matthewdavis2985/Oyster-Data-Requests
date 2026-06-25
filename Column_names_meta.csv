@@ -55,3 +55,9 @@ SampleEventWQ,YSICalibration,YSICalibration,Calibration status of YSI
 Dermo,SampleNumber,SampleNumber,Sequential oyster sample number ID
 Repro,SampleNumber,SampleNumber,Sequential oyster sample number ID
 ConditionIndex,SampleNumber,SampleNumber,Sequential oyster sample number ID
+Dermo,Estuary,Estuary,Two character code for each estuary
+Dermo,SectionName,SectionName,One character code for estuary sections
+Dermo,StationName,StationName,"Combination of estuary code, section code, and station number"
+Dermo,StationNumber,Station number,Numerical designation for sample locations
+Dermo,DermoMantle,DermoMantle,Numerical value for amount of dermo found in mantle tissue sample
+Dermo,DermoGill,DermoGill,Numerical value for amount of dermo found in gill tissue sample
